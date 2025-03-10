@@ -117,6 +117,12 @@ export default function GameBoard({ gameId, currentUser, isSpectator = false, gr
   };
 
   const handleClick = async (index: number) => {
+    // Don't allow moves if:
+    // 1. Cell is already filled
+    // 2. There's already a winner
+    // 3. User is spectating
+    // 4. In a game and it's not user's turn
+    // 5. Not in a game and it's O's turn (computer/other player)
     if (
       board[index] || 
       winner || 
@@ -149,6 +155,20 @@ export default function GameBoard({ gameId, currentUser, isSpectator = false, gr
     }
 
     setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
+
+    // If playing against computer (no gameId), make computer move
+    if (!gameId && !gameWinner) {
+      setTimeout(() => {
+        const emptyCells = newBoard
+          .map((cell, idx) => cell === null ? idx : null)
+          .filter((idx): idx is number => idx !== null);
+
+        if (emptyCells.length > 0) {
+          const computerMove = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+          handleClick(computerMove);
+        }
+      }, 500);
+    }
   };
 
   const gridStyle = {
@@ -185,7 +205,7 @@ export default function GameBoard({ gameId, currentUser, isSpectator = false, gr
             key={index}
             onClick={() => handleClick(index)}
             className={`aspect-square bg-gray-700/50 rounded-lg flex items-center justify-center text-2xl font-bold transition-colors hover:bg-gray-600/50 ${
-              value === 'X' ? 'text-blue-400' : 'text-red-400'
+              value === 'X' ? 'text-blue-400' : value === 'O' ? 'text-red-400' : ''
             }`}
             disabled={
               !!value || 
