@@ -26,11 +26,22 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
   const router = useRouter();
 
   useEffect(() => {
+    let isSubscribed = true;
+
     // Set up initial presence
     const setupPresence = async () => {
+      if (!isSubscribed) return;
+
+      // First, clean up any existing presence for this user
       await supabase
         .from('presence')
-        .upsert({
+        .delete()
+        .eq('user_id', currentUser.id);
+
+      // Then create a new presence
+      await supabase
+        .from('presence')
+        .insert({
           user_id: currentUser.id,
           username: currentUser.email?.split('@')[0],
           status: 'online'
@@ -41,9 +52,19 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     const presenceChannel = supabase.channel('presence');
     
     presenceChannel
-      .on('presence', { event: 'sync' }, () => {
-        fetchActiveUsers();
-      })
+      .on(
+        'postgres_changes' as any,
+        {
+          event: '*',
+          schema: 'public',
+          table: 'presence'
+        },
+        () => {
+          if (isSubscribed) {
+            fetchActiveUsers();
+          }
+        }
+      )
       .subscribe();
 
     // Subscribe to challenges
@@ -58,7 +79,9 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
           table: 'game_challenges'
         },
         () => {
-          fetchChallenges();
+          if (isSubscribed) {
+            fetchChallenges();
+          }
         }
       )
       .subscribe();
@@ -68,20 +91,48 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     fetchChallenges();
 
     // Update presence every minute
-    const interval = setInterval(() => {
-      supabase
+    const interval = setInterval(async () => {
+      if (!isSubscribed) return;
+
+      const { data } = await supabase
         .from('presence')
-        .upsert({
-          user_id: currentUser.id,
-          username: currentUser.email?.split('@')[0],
-          status: 'online'
-        });
+        .update({
+          last_seen: new Date().toISOString()
+        })
+        .eq('user_id', currentUser.id)
+        .select()
+        .single();
+
+      if (!data) {
+        // If presence record doesn't exist, create it
+        await setupPresence();
+      }
     }, 60000);
 
-    return () => {
+    // Cleanup function
+    const cleanup = async () => {
+      if (!isSubscribed) return;
+
+      await supabase
+        .from('presence')
+        .delete()
+        .eq('user_id', currentUser.id);
+      
       presenceChannel.unsubscribe();
       challengesChannel.unsubscribe();
       clearInterval(interval);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', cleanup);
+    }
+
+    return () => {
+      isSubscribed = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', cleanup);
+      }
+      cleanup();
     };
   }, [currentUser]);
 
@@ -92,7 +143,15 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
       .gt('last_seen', new Date(Date.now() - 5 * 60 * 1000).toISOString());
     
     if (data) {
-      setActiveUsers(data);
+      // Remove duplicates by user_id, keeping only the most recent entry
+      const uniqueUsers = data.reduce((acc, user) => {
+        if (!acc[user.user_id] || new Date(user.last_seen) > new Date(acc[user.user_id].last_seen)) {
+          acc[user.user_id] = user;
+        }
+        return acc;
+      }, {} as Record<string, ActiveUser>);
+      
+      setActiveUsers(Object.values(uniqueUsers));
     }
   };
 
