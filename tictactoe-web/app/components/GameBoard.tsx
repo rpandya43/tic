@@ -2,261 +2,191 @@
 
 import { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-
-type Player = 'X' | 'O';
-type Board = (Player | null)[];
-type Move = { position: number; player: Player };
+import { User } from '@supabase/supabase-js';
 
 interface GameBoardProps {
-  initialMoves?: Move[];
-  isReplay?: boolean;
+  gameId?: string;
+  currentUser: User;
+  isSpectator?: boolean;
+  gridSize?: number;
+  onGameEnd?: (winner: string | null) => void;
 }
 
-export default function GameBoard({ initialMoves, isReplay }: GameBoardProps) {
-  const [board, setBoard] = useState<Board>(Array(9).fill(null));
-  const [currentPlayer, setCurrentPlayer] = useState<Player>('X');
-  const [winner, setWinner] = useState<Player | null>(null);
-  const [isGameOver, setIsGameOver] = useState(false);
-  const [isAutoPlay, setIsAutoPlay] = useState(false);
-  const [moves, setMoves] = useState<Move[]>([]);
-  const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
+export default function GameBoard({ gameId, currentUser, isSpectator = false, gridSize = 3, onGameEnd }: GameBoardProps) {
+  const [board, setBoard] = useState<(string | null)[]>(Array(gridSize * gridSize).fill(null));
+  const [currentPlayer, setCurrentPlayer] = useState<'X' | 'O'>('X');
+  const [winner, setWinner] = useState<string | null>(null);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [playerRole, setPlayerRole] = useState<'X' | 'O' | null>(null);
   const supabase = createClientComponentClient();
 
   useEffect(() => {
-    if (initialMoves && isReplay) {
-      setMoves(initialMoves);
-      if (currentMoveIndex < initialMoves.length - 1) {
-        const timer = setTimeout(() => {
-          setCurrentMoveIndex(prev => prev + 1);
-        }, 1000);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [initialMoves, currentMoveIndex, isReplay]);
+    // Reset board when grid size changes
+    setBoard(Array(gridSize * gridSize).fill(null));
+    setWinner(null);
+    setCurrentPlayer('X');
+  }, [gridSize]);
 
   useEffect(() => {
-    if (isReplay && currentMoveIndex >= 0) {
-      const newBoard = Array(9).fill(null);
-      for (let i = 0; i <= currentMoveIndex; i++) {
-        newBoard[moves[i].position] = moves[i].player;
-      }
-      setBoard(newBoard);
-      setCurrentPlayer(currentMoveIndex % 2 === 0 ? 'O' : 'X');
+    if (!gameId) return;
 
-      // Check for winner after applying moves
-      const gameWinner = checkWinner(newBoard);
-      if (gameWinner) {
-        setWinner(gameWinner);
-        setIsGameOver(true);
-      } else if (!newBoard.includes(null)) {
-        setIsGameOver(true);
+    const fetchGame = async () => {
+      const { data: game } = await supabase
+        .from('live_games')
+        .select('*')
+        .eq('id', gameId)
+        .single();
+
+      if (game) {
+        setBoard(game.current_board || Array(gridSize * gridSize).fill(null));
+        setGameStarted(true);
+        if (game.player_x === currentUser.id) {
+          setPlayerRole('X');
+        } else if (game.player_o === currentUser.id) {
+          setPlayerRole('O');
+        }
       }
+    };
+
+    fetchGame();
+
+    // Subscribe to game updates
+    const channel = supabase.channel(`game_${gameId}`);
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'live_games',
+          filter: `id=eq.${gameId}`
+        },
+        (payload) => {
+          if (payload.new) {
+            setBoard(payload.new.current_board);
+            checkWinner(payload.new.current_board);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [gameId, currentUser.id, gridSize]);
+
+  const checkWinner = (currentBoard: (string | null)[]) => {
+    // Check rows
+    for (let i = 0; i < gridSize; i++) {
+      const row = currentBoard.slice(i * gridSize, (i + 1) * gridSize);
+      if (row.every(cell => cell === 'X')) return 'X';
+      if (row.every(cell => cell === 'O')) return 'O';
     }
-  }, [currentMoveIndex, moves, isReplay]);
 
-  const checkWinner = (squares: Board): Player | null => {
-    const lines = [
-      [0, 1, 2],
-      [3, 4, 5],
-      [6, 7, 8],
-      [0, 3, 6],
-      [1, 4, 7],
-      [2, 5, 8],
-      [0, 4, 8],
-      [2, 4, 6],
-    ];
-
-    for (const [a, b, c] of lines) {
-      if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
-        return squares[a];
-      }
+    // Check columns
+    for (let i = 0; i < gridSize; i++) {
+      const column = Array.from({ length: gridSize }, (_, j) => currentBoard[i + j * gridSize]);
+      if (column.every(cell => cell === 'X')) return 'X';
+      if (column.every(cell => cell === 'O')) return 'O';
     }
+
+    // Check diagonals
+    const diagonal1 = Array.from({ length: gridSize }, (_, i) => currentBoard[i * (gridSize + 1)]);
+    const diagonal2 = Array.from({ length: gridSize }, (_, i) => currentBoard[(i + 1) * (gridSize - 1)]);
+
+    if (diagonal1.every(cell => cell === 'X')) return 'X';
+    if (diagonal1.every(cell => cell === 'O')) return 'O';
+    if (diagonal2.every(cell => cell === 'X')) return 'X';
+    if (diagonal2.every(cell => cell === 'O')) return 'O';
+
+    // Check for draw
+    if (currentBoard.every(cell => cell !== null)) return 'draw';
 
     return null;
   };
 
-  const getEmptyCells = (squares: Board): number[] => {
-    return squares.reduce<number[]>((acc, cell, index) => {
-      if (!cell) acc.push(index);
-      return acc;
-    }, []);
-  };
-
-  const findBestMove = (squares: Board): number => {
-    const emptyCells = getEmptyCells(squares);
-    
-    // First, check if computer can win in next move
-    for (const cell of emptyCells) {
-      const testBoard = [...squares];
-      testBoard[cell] = 'O';
-      if (checkWinner(testBoard) === 'O') {
-        return cell;
-      }
-    }
-
-    // Second, check if player is about to win and block them
-    for (const cell of emptyCells) {
-      const testBoard = [...squares];
-      testBoard[cell] = 'X';
-      if (checkWinner(testBoard) === 'X') {
-        return cell;
-      }
-    }
-
-    // Try to take center if available
-    if (emptyCells.includes(4)) {
-      return 4;
-    }
-
-    // Try to take corners
-    const corners = [0, 2, 6, 8].filter(corner => emptyCells.includes(corner));
-    if (corners.length > 0) {
-      return corners[Math.floor(Math.random() * corners.length)];
-    }
-
-    // Take any available edge
-    const edges = [1, 3, 5, 7].filter(edge => emptyCells.includes(edge));
-    if (edges.length > 0) {
-      return edges[Math.floor(Math.random() * edges.length)];
-    }
-
-    // If nothing else, take random move
-    return emptyCells[Math.floor(Math.random() * emptyCells.length)];
-  };
-
-  const makeAutoMove = () => {
-    const bestMove = findBestMove(board);
-    if (bestMove !== undefined) {
-      handleClick(bestMove);
-    }
-  };
-
-  useEffect(() => {
-    if (isAutoPlay && currentPlayer === 'O' && !isGameOver && !isReplay) {
-      const timer = setTimeout(() => {
-        makeAutoMove();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [currentPlayer, isAutoPlay, isGameOver]);
-
   const handleClick = async (index: number) => {
-    if (board[index] || isGameOver || isReplay) return;
+    if (
+      board[index] || 
+      winner || 
+      isSpectator || 
+      (gameId && playerRole !== currentPlayer) ||
+      (!gameId && currentPlayer === 'O')
+    ) {
+      return;
+    }
 
     const newBoard = [...board];
     newBoard[index] = currentPlayer;
-    const newMoves = [...moves, { position: index, player: currentPlayer }];
     setBoard(newBoard);
-    setMoves(newMoves);
 
     const gameWinner = checkWinner(newBoard);
     if (gameWinner) {
       setWinner(gameWinner);
-      setIsGameOver(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // Store match history regardless of winner
-        await supabase
-          .from('match_history')
-          .insert({
-            user_id: user.id,
-            winner: gameWinner,
-            moves: newMoves
-          });
-
-        // Update wins only if X wins
-        if (gameWinner === 'X') {
-          const { data: stats } = await supabase
-            .from('game_stats')
-            .select('wins')
-            .eq('user_id', user.id)
-            .single();
-
-          const currentWins = stats?.wins || 0;
-          await supabase
-            .from('game_stats')
-            .upsert({
-              user_id: user.id,
-              wins: currentWins + 1,
-            });
-        }
-      }
-    } else if (!newBoard.includes(null)) {
-      setIsGameOver(true);
-      // Store draws in match history
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('match_history')
-          .insert({
-            user_id: user.id,
-            winner: currentPlayer, // Store the last player as winner in case of draw
-            moves: newMoves
-          });
-      }
-    } else {
-      setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
+      if (onGameEnd) onGameEnd(gameWinner);
     }
+
+    if (gameId) {
+      // Update game state in database
+      await supabase
+        .from('live_games')
+        .update({
+          current_board: newBoard,
+          last_move: new Date().toISOString()
+        })
+        .eq('id', gameId);
+    }
+
+    setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
   };
 
-  const resetGame = () => {
-    setBoard(Array(9).fill(null));
-    setCurrentPlayer('X');
-    setWinner(null);
-    setIsGameOver(false);
-    setMoves([]);
-    setCurrentMoveIndex(-1);
+  const gridStyle = {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
+    gap: '0.5rem',
+    width: '100%',
+    maxWidth: '400px'
   };
 
   return (
-    <div className="w-full max-w-md mx-auto space-y-8">
-      {!isReplay && (
-        <div className="flex justify-between items-center">
-          <div className="text-xl font-semibold text-gray-200">
-            Mode: {isAutoPlay ? 'vs Computer' : 'vs Player'}
-          </div>
-          <button
-            onClick={() => setIsAutoPlay(!isAutoPlay)}
-            className="btn-secondary"
-          >
-            {isAutoPlay ? 'Switch to 2 Players' : 'Switch to vs Computer'}
-          </button>
+    <div className="flex flex-col items-center gap-4">
+      {winner && (
+        <div className="text-xl font-bold text-gray-200 mb-4">
+          {winner === 'draw' ? "It's a draw!" : `Player ${winner} wins!`}
         </div>
       )}
-      <div className="grid grid-cols-3 gap-4">
-        {board.map((cell, index) => (
+      
+      {!isSpectator && (
+        <div className="text-gray-200 mb-4">
+          {gameId ? (
+            playerRole ? 
+              `You are Player ${playerRole}` : 
+              'Spectating'
+          ) : (
+            `Current Player: ${currentPlayer}`
+          )}
+        </div>
+      )}
+
+      <div style={gridStyle}>
+        {board.map((value, index) => (
           <button
             key={index}
             onClick={() => handleClick(index)}
-            disabled={!!cell || isGameOver || (isAutoPlay && currentPlayer === 'O') || isReplay}
-            className={`w-24 h-24 text-4xl font-bold rounded-xl transition-all duration-200
-              ${!cell && !isGameOver && !isReplay ? 'hover:bg-gray-700/50' : ''}
-              ${cell ? 'bg-gray-800' : 'bg-gray-800/50'}
-              ${cell === 'X' ? 'text-blue-400' : cell === 'O' ? 'text-green-400' : 'text-gray-700'}
-              disabled:cursor-not-allowed backdrop-blur-sm
-              border-2 border-gray-700/50 hover:border-gray-600
-              focus:outline-none focus:ring-2 focus:ring-blue-500/50`}
+            className={`aspect-square bg-gray-700/50 rounded-lg flex items-center justify-center text-2xl font-bold transition-colors hover:bg-gray-600/50 ${
+              value === 'X' ? 'text-blue-400' : 'text-red-400'
+            }`}
+            disabled={
+              !!value || 
+              !!winner || 
+              isSpectator || 
+              (gameId && playerRole !== currentPlayer) ||
+              (!gameId && currentPlayer === 'O')
+            }
           >
-            {cell}
+            {value}
           </button>
         ))}
-      </div>
-      <div className="text-center space-y-4">
-        <div className="text-2xl font-semibold text-gray-200">
-          {winner 
-            ? `Winner: ${winner}` 
-            : isGameOver 
-              ? 'Game Over - Draw!' 
-              : `Current Player: ${currentPlayer}`}
-        </div>
-        {!isReplay && (
-          <button
-            onClick={resetGame}
-            className="btn-primary"
-          >
-            Reset Game
-          </button>
-        )}
       </div>
     </div>
   );
