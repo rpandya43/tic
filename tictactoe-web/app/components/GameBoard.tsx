@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 type Player = 'X' | 'O';
@@ -11,6 +11,7 @@ export default function GameBoard() {
   const [currentPlayer, setCurrentPlayer] = useState<Player>('X');
   const [winner, setWinner] = useState<Player | null>(null);
   const [isGameOver, setIsGameOver] = useState(false);
+  const [isAutoPlay, setIsAutoPlay] = useState(false);
   const supabase = createClientComponentClient();
 
   const checkWinner = (squares: Board): Player | null => {
@@ -33,6 +34,30 @@ export default function GameBoard() {
 
     return null;
   };
+
+  const getEmptyCells = (squares: Board): number[] => {
+    return squares.reduce<number[]>((acc, cell, index) => {
+      if (!cell) acc.push(index);
+      return acc;
+    }, []);
+  };
+
+  const makeAutoMove = () => {
+    const emptyCells = getEmptyCells(board);
+    if (emptyCells.length > 0) {
+      const randomIndex = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+      handleClick(randomIndex);
+    }
+  };
+
+  useEffect(() => {
+    if (isAutoPlay && currentPlayer === 'O' && !isGameOver) {
+      const timer = setTimeout(() => {
+        makeAutoMove();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [currentPlayer, isAutoPlay, isGameOver]);
 
   const handleClick = async (index: number) => {
     if (board[index] || isGameOver) return;
@@ -79,12 +104,23 @@ export default function GameBoard() {
 
   return (
     <div className="w-full max-w-md mx-auto space-y-8">
+      <div className="flex justify-between items-center">
+        <div className="text-xl font-semibold text-gray-200">
+          Mode: {isAutoPlay ? 'vs Computer' : 'vs Player'}
+        </div>
+        <button
+          onClick={() => setIsAutoPlay(!isAutoPlay)}
+          className="btn-secondary"
+        >
+          {isAutoPlay ? 'Switch to 2 Players' : 'Switch to vs Computer'}
+        </button>
+      </div>
       <div className="grid grid-cols-3 gap-4">
         {board.map((cell, index) => (
           <button
             key={index}
             onClick={() => handleClick(index)}
-            disabled={!!cell || isGameOver}
+            disabled={!!cell || isGameOver || (isAutoPlay && currentPlayer === 'O')}
             className={`w-24 h-24 text-4xl font-bold rounded-xl transition-all duration-200
               ${!cell && !isGameOver ? 'hover:bg-gray-700/50' : ''}
               ${cell ? 'bg-gray-800' : 'bg-gray-800/50'}
@@ -107,9 +143,7 @@ export default function GameBoard() {
         </div>
         <button
           onClick={resetGame}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 
-            transition-colors duration-200 focus:outline-none focus:ring-2 
-            focus:ring-blue-500 focus:ring-opacity-50"
+          className="btn-primary"
         >
           Reset Game
         </button>
