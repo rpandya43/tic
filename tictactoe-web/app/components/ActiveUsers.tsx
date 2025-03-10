@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { User } from '@supabase/supabase-js';
+import { useRouter } from 'next/navigation';
 
 interface ActiveUser {
   id: string;
@@ -22,6 +23,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const supabase = createClientComponentClient();
+  const router = useRouter();
 
   useEffect(() => {
     // Set up initial presence
@@ -147,7 +149,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
             .in('user_id', [challenge.challenger_id, challenge.challenged_id]);
 
           // Redirect to the game
-          window.location.href = `/game/${game.id}`;
+          router.push(`/game/${game.id}`);
         }
       }
     } else {
@@ -159,7 +161,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
   };
 
   const spectateGame = (gameId: string) => {
-    window.location.href = `/game/${gameId}?spectate=true`;
+    router.push(`/game/${gameId}?spectate=true`);
   };
 
   return (

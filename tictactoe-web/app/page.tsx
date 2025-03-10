@@ -1,8 +1,8 @@
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import GameBoard from './components/GameBoard';
+import ActiveUsers from './components/ActiveUsers';
 import Footer from './components/Footer';
 
 export default async function Home() {
@@ -16,16 +16,16 @@ export default async function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center p-6 relative">
       <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-transparent to-purple-600/10 z-0" />
-      <div className="relative z-10 w-full max-w-4xl mx-auto">
+      <div className="relative z-10 w-full max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-12">
           <h1 className="text-4xl font-bold text-white">Tic Tac Toe</h1>
           <div className="flex gap-4">
-            <Link
+            <a
               href="/stats"
               className="btn-primary"
             >
               View Stats
-            </Link>
+            </a>
             <form action="/auth/signout" method="post">
               <button
                 type="submit"
@@ -36,7 +36,15 @@ export default async function Home() {
             </form>
           </div>
         </div>
-        <GameBoard />
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+          <div className="lg:col-span-3">
+            <GameBoard />
+          </div>
+          <div>
+            <ActiveUsers currentUser={session.user} />
+          </div>
+        </div>
       </div>
       <Footer />
     </main>
