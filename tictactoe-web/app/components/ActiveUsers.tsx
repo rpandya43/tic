@@ -49,7 +49,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     
     challengesChannel
       .on(
-        'postgres_changes',
+        'postgres_changes' as any,
         {
           event: '*',
           schema: 'public',

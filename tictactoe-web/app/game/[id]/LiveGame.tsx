@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { User } from '@supabase/supabase-js';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 type Player = 'X' | 'O';
 type Board = (Player | null)[];
@@ -52,7 +53,7 @@ export default function LiveGame({
     // Handle game updates
     gameChannel
       .on(
-        'postgres_changes',
+        'postgres_changes' as any,
         {
           event: '*',
           schema: 'public',
