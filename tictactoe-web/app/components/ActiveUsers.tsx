@@ -84,12 +84,32 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
           event: '*',
           schema: 'public',
           table: 'game_challenges',
-          filter: `challenger_id=eq.${currentUser.id},challenged_id=eq.${currentUser.id}`
+          filter: `challenger_id=eq.${currentUser.id} OR challenged_id=eq.${currentUser.id}`
         },
-        () => {
-          if (isSubscribed) {
-            fetchChallenges();
+        async (payload) => {
+          if (!isSubscribed) return;
+
+          // If a challenge was accepted, check if we need to redirect
+          if (payload.new && payload.new.status === 'accepted') {
+            const challenge = payload.new as Challenge;
+            if (challenge.challenger_id === currentUser.id || challenge.challenged_id === currentUser.id) {
+              const { data: game } = await supabase
+                .from('live_games')
+                .select('*')
+                .eq('player_x', challenge.challenger_id)
+                .eq('player_o', challenge.challenged_id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+
+              if (game) {
+                router.push(`/game/${game.id}`);
+                return;
+              }
+            }
           }
+
+          fetchChallenges();
         }
       )
       .subscribe();
@@ -139,23 +159,18 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
       }
     };
 
-    // Handle cleanup on unmount
-    const handleBeforeUnload = () => {
-      cleanup();
-    };
-
-    if (typeof globalThis !== 'undefined') {
-      globalThis.addEventListener('beforeunload', handleBeforeUnload);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', cleanup);
     }
 
     return () => {
       isSubscribed = false;
-      if (typeof globalThis !== 'undefined') {
-        globalThis.removeEventListener('beforeunload', handleBeforeUnload);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', cleanup);
       }
       cleanup();
     };
-  }, [currentUser]);
+  }, [currentUser, router]);
 
   const fetchActiveUsers = async () => {
     try {
