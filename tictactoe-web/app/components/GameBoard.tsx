@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { User } from '@supabase/supabase-js';
+import { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 interface GameBoardProps {
   gameId?: string;
@@ -10,6 +11,15 @@ interface GameBoardProps {
   isSpectator?: boolean;
   gridSize?: number;
   onGameEnd?: (winner: string | null) => void;
+}
+
+interface LiveGame {
+  id: string;
+  player_x: string;
+  player_o: string;
+  current_board: (string | null)[];
+  grid_size: number;
+  last_move: string;
 }
 
 export default function GameBoard({ gameId, currentUser, isSpectator = false, gridSize = 3, onGameEnd }: GameBoardProps) {
@@ -54,17 +64,18 @@ export default function GameBoard({ gameId, currentUser, isSpectator = false, gr
     const channel = supabase.channel(`game_${gameId}`);
     channel
       .on(
-        'postgres_changes',
+        'postgres_changes' as const,
         {
           event: '*',
           schema: 'public',
           table: 'live_games',
           filter: `id=eq.${gameId}`
         },
-        (payload) => {
-          if (payload.new) {
-            setBoard(payload.new.current_board);
-            checkWinner(payload.new.current_board);
+        (payload: RealtimePostgresChangesPayload<LiveGame>) => {
+          if (payload.new && 'current_board' in payload.new) {
+            const game = payload.new as LiveGame;
+            setBoard(game.current_board);
+            checkWinner(game.current_board);
           }
         }
       )
