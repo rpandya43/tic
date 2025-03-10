@@ -71,7 +71,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     
     presenceChannel
       .on(
-        'postgres_changes' as 'postgres_changes',
+        'postgres_changes' as const,
         {
           event: '*',
           schema: 'public',
@@ -92,19 +92,19 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     
     challengesChannel
       .on(
-        'postgres_changes',
+        'postgres_changes' as const,
         {
           event: '*',
           schema: 'public',
           table: 'game_challenges'
         },
-        async (payload: { new: Challenge; old: Challenge; eventType: string }) => {
+        async (payload: RealtimePostgresChangesPayload<Challenge>) => {
           if (!isSubscribed) return;
           console.log('Challenge update received:', payload);
 
           // If a challenge was accepted
-          if (payload.new?.status === 'accepted') {
-            const challenge = payload.new;
+          if (payload.new && 'status' in payload.new && payload.new.status === 'accepted') {
+            const challenge = payload.new as Challenge;
             
             // Check if current user is involved in the challenge
             if (challenge.challenger_id === currentUser.id || challenge.challenged_id === currentUser.id) {
@@ -153,7 +153,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     
     gamesChannel
       .on(
-        'postgres_changes',
+        'postgres_changes' as const,
         {
           event: '*',
           schema: 'public',
@@ -213,14 +213,15 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
       }
     };
 
+    // Handle window events in a type-safe way for browser environments
     if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', cleanup);
+      (window as Window).addEventListener('beforeunload', cleanup);
     }
 
     return () => {
       isSubscribed = false;
       if (typeof window !== 'undefined') {
-        window.removeEventListener('beforeunload', cleanup);
+        (window as Window).removeEventListener('beforeunload', cleanup);
       }
       cleanup();
     };
