@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { User } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+import { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 interface ActiveUser {
   id: string;
@@ -54,154 +55,172 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
           .insert({
             user_id: currentUser.id,
             username: currentUser.email?.split('@')[0],
-            status: 'online'
+            status: 'online',
+            last_seen: new Date().toISOString()
           });
+
+        // Immediately fetch active users after setting up presence
+        await fetchActiveUsers();
       } catch (error) {
         console.error('Error setting up presence:', error);
       }
     };
 
-    // Subscribe to presence changes
-    const presenceChannel = supabase.channel('presence');
+    // Subscribe to presence changes with better error handling
+    const presenceChannel = supabase.channel('presence_updates');
     
     presenceChannel
       .on(
-        'postgres_changes' as any,
+        'postgres_changes' as 'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'presence'
         },
-        () => {
-          if (isSubscribed) {
-            fetchActiveUsers();
-          }
+        async (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
+          if (!isSubscribed) return;
+          console.log('Presence update received:', payload);
+          await fetchActiveUsers();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Presence subscription status:', status);
+      });
 
-    // Subscribe to challenges
-    const challengesChannel = supabase.channel('challenges');
+    // Subscribe to challenges with proper typing
+    const challengesChannel = supabase.channel('challenge_updates');
     
     challengesChannel
       .on(
-        'postgres_changes' as any,
+        'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'game_challenges'
         },
-        async (payload: RealtimePayload) => {
+        async (payload: { new: Challenge; old: Challenge; eventType: string }) => {
           if (!isSubscribed) return;
+          console.log('Challenge update received:', payload);
 
-          // If a challenge was accepted, check if we need to redirect
-          if (payload.new && payload.new.status === 'accepted') {
+          // If a challenge was accepted
+          if (payload.new?.status === 'accepted') {
             const challenge = payload.new;
+            
+            // Check if current user is involved in the challenge
             if (challenge.challenger_id === currentUser.id || challenge.challenged_id === currentUser.id) {
-              const { data: game } = await supabase
-                .from('live_games')
-                .select('*')
-                .eq('player_x', challenge.challenger_id)
-                .eq('player_o', challenge.challenged_id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .single();
-
-              if (game) {
-                // Update both players' presence
-                await supabase
-                  .from('presence')
-                  .update({
-                    status: 'in_game',
-                    current_game_id: game.id
+              try {
+                // Create new game
+                const { data: game, error: gameError } = await supabase
+                  .from('live_games')
+                  .insert({
+                    player_x: challenge.challenger_id,
+                    player_o: challenge.challenged_id,
+                    current_board: Array(9).fill(null)
                   })
-                  .in('user_id', [challenge.challenger_id, challenge.challenged_id]);
+                  .select()
+                  .single();
 
-                router.push(`/game/${game.id}`);
-                return;
+                if (gameError) throw gameError;
+
+                if (game) {
+                  // Update both players' presence
+                  await supabase
+                    .from('presence')
+                    .update({
+                      status: 'in_game',
+                      current_game_id: game.id
+                    })
+                    .in('user_id', [challenge.challenger_id, challenge.challenged_id]);
+
+                  router.push(`/game/${game.id}`);
+                }
+              } catch (error) {
+                console.error('Error handling accepted challenge:', error);
               }
             }
           }
 
-          // Always fetch challenges to update the UI
+          // Always fetch challenges to update UI
           await fetchChallenges();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Challenges subscription status:', status);
+      });
 
-    // Subscribe to live games
-    const gamesChannel = supabase.channel('games');
+    // Subscribe to live games with proper error handling
+    const gamesChannel = supabase.channel('game_updates');
     
     gamesChannel
       .on(
-        'postgres_changes' as any,
+        'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'live_games'
         },
-        () => {
-          if (isSubscribed) {
-            fetchActiveUsers();
-          }
+        async () => {
+          if (!isSubscribed) return;
+          await fetchActiveUsers();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Games subscription status:', status);
+      });
 
+    // Initial setup
     setupPresence();
     fetchActiveUsers();
     fetchChallenges();
 
-    // Update presence every minute
+    // Update presence more frequently (every 30 seconds)
     const interval = setInterval(async () => {
       if (!isSubscribed) return;
 
       try {
-        const { data } = await supabase
+        const { error } = await supabase
           .from('presence')
           .update({
             last_seen: new Date().toISOString()
           })
-          .eq('user_id', currentUser.id)
-          .select()
-          .single();
+          .eq('user_id', currentUser.id);
 
-        if (!data) {
-          // If presence record doesn't exist, create it
+        if (error) {
+          // If presence record doesn't exist, recreate it
           await setupPresence();
         }
       } catch (error) {
         console.error('Error updating presence:', error);
       }
-    }, 60000);
+    }, 30000);
 
-    // Cleanup function
+    // Cleanup function with better error handling
     const cleanup = async () => {
-      if (!isSubscribed) return;
-
       try {
-        await supabase
-          .from('presence')
-          .delete()
-          .eq('user_id', currentUser.id);
-        
+        if (isSubscribed) {
+          await supabase
+            .from('presence')
+            .delete()
+            .eq('user_id', currentUser.id);
+        }
+      } catch (error) {
+        console.error('Error cleaning up presence:', error);
+      } finally {
         presenceChannel.unsubscribe();
         challengesChannel.unsubscribe();
         gamesChannel.unsubscribe();
         clearInterval(interval);
-      } catch (error) {
-        console.error('Error cleaning up:', error);
       }
     };
 
-    if (typeof globalThis !== 'undefined' && 'window' in globalThis) {
-      globalThis.window.addEventListener('beforeunload', cleanup);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', cleanup);
     }
 
     return () => {
       isSubscribed = false;
-      if (typeof globalThis !== 'undefined' && 'window' in globalThis) {
-        globalThis.window.removeEventListener('beforeunload', cleanup);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', cleanup);
       }
       cleanup();
     };
