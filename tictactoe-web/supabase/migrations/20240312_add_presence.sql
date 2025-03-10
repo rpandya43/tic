@@ -43,15 +43,16 @@ create policy "Users can see all presence data"
   to authenticated
   using (true);
 
-create policy "Users can update their own presence"
+create policy "Users can insert their own presence"
   on public.presence for insert
   to authenticated
-  using (auth.uid() = user_id);
+  with check (auth.uid() = user_id);
 
 create policy "Users can update their own presence"
   on public.presence for update
   to authenticated
-  using (auth.uid() = user_id);
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 -- Game challenges policies
 create policy "Users can see their challenges"
@@ -62,12 +63,13 @@ create policy "Users can see their challenges"
 create policy "Users can create challenges"
   on public.game_challenges for insert
   to authenticated
-  using (auth.uid() = challenger_id);
+  with check (auth.uid() = challenger_id);
 
 create policy "Users can update their challenges"
   on public.game_challenges for update
   to authenticated
-  using (auth.uid() in (challenger_id, challenged_id));
+  using (auth.uid() in (challenger_id, challenged_id))
+  with check (auth.uid() in (challenger_id, challenged_id));
 
 -- Live games policies
 create policy "Anyone can view live games"
@@ -75,10 +77,16 @@ create policy "Anyone can view live games"
   to authenticated
   using (true);
 
+create policy "Players can insert games"
+  on public.live_games for insert
+  to authenticated
+  with check (auth.uid() in (player_x, player_o));
+
 create policy "Players can update their games"
   on public.live_games for update
   to authenticated
-  using (auth.uid() in (player_x, player_o));
+  using (auth.uid() in (player_x, player_o))
+  with check (auth.uid() in (player_x, player_o));
 
 -- Function to update presence
 create or replace function public.handle_presence()
