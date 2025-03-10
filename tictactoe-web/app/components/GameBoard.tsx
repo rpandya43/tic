@@ -82,11 +82,52 @@ export default function GameBoard({ initialMoves, isReplay }: GameBoardProps) {
     }, []);
   };
 
+  const findBestMove = (squares: Board): number => {
+    const emptyCells = getEmptyCells(squares);
+    
+    // First, check if computer can win in next move
+    for (const cell of emptyCells) {
+      const testBoard = [...squares];
+      testBoard[cell] = 'O';
+      if (checkWinner(testBoard) === 'O') {
+        return cell;
+      }
+    }
+
+    // Second, check if player is about to win and block them
+    for (const cell of emptyCells) {
+      const testBoard = [...squares];
+      testBoard[cell] = 'X';
+      if (checkWinner(testBoard) === 'X') {
+        return cell;
+      }
+    }
+
+    // Try to take center if available
+    if (emptyCells.includes(4)) {
+      return 4;
+    }
+
+    // Try to take corners
+    const corners = [0, 2, 6, 8].filter(corner => emptyCells.includes(corner));
+    if (corners.length > 0) {
+      return corners[Math.floor(Math.random() * corners.length)];
+    }
+
+    // Take any available edge
+    const edges = [1, 3, 5, 7].filter(edge => emptyCells.includes(edge));
+    if (edges.length > 0) {
+      return edges[Math.floor(Math.random() * edges.length)];
+    }
+
+    // If nothing else, take random move
+    return emptyCells[Math.floor(Math.random() * emptyCells.length)];
+  };
+
   const makeAutoMove = () => {
-    const emptyCells = getEmptyCells(board);
-    if (emptyCells.length > 0) {
-      const randomIndex = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-      handleClick(randomIndex);
+    const bestMove = findBestMove(board);
+    if (bestMove !== undefined) {
+      handleClick(bestMove);
     }
   };
 
