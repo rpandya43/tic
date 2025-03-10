@@ -7,9 +7,11 @@ import { useRouter } from 'next/navigation';
 
 interface ActiveUser {
   id: string;
+  user_id: string;
   username: string;
   status: 'online' | 'in_game' | 'idle';
   current_game_id?: string;
+  last_seen: string;
 }
 
 interface Challenge {
@@ -22,6 +24,7 @@ interface Challenge {
 export default function ActiveUsers({ currentUser }: { currentUser: User }) {
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const supabase = createClientComponentClient();
   const router = useRouter();
 
@@ -32,24 +35,28 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     const setupPresence = async () => {
       if (!isSubscribed) return;
 
-      // First, clean up any existing presence for this user
-      await supabase
-        .from('presence')
-        .delete()
-        .eq('user_id', currentUser.id);
+      try {
+        // First, clean up any existing presence for this user
+        await supabase
+          .from('presence')
+          .delete()
+          .eq('user_id', currentUser.id);
 
-      // Then create a new presence
-      await supabase
-        .from('presence')
-        .insert({
-          user_id: currentUser.id,
-          username: currentUser.email?.split('@')[0],
-          status: 'online'
-        });
+        // Then create a new presence
+        await supabase
+          .from('presence')
+          .insert({
+            user_id: currentUser.id,
+            username: currentUser.email?.split('@')[0],
+            status: 'online'
+          });
+      } catch (error) {
+        console.error('Error setting up presence:', error);
+      }
     };
 
     // Subscribe to presence changes
-    const presenceChannel = supabase.channel('presence');
+    const presenceChannel = supabase.channel('presence-' + currentUser.id);
     
     presenceChannel
       .on(
@@ -68,7 +75,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
       .subscribe();
 
     // Subscribe to challenges
-    const challengesChannel = supabase.channel('challenges');
+    const challengesChannel = supabase.channel('challenges-' + currentUser.id);
     
     challengesChannel
       .on(
@@ -76,7 +83,8 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
         {
           event: '*',
           schema: 'public',
-          table: 'game_challenges'
+          table: 'game_challenges',
+          filter: `challenger_id=eq.${currentUser.id},challenged_id=eq.${currentUser.id}`
         },
         () => {
           if (isSubscribed) {
@@ -94,18 +102,22 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     const interval = setInterval(async () => {
       if (!isSubscribed) return;
 
-      const { data } = await supabase
-        .from('presence')
-        .update({
-          last_seen: new Date().toISOString()
-        })
-        .eq('user_id', currentUser.id)
-        .select()
-        .single();
+      try {
+        const { data } = await supabase
+          .from('presence')
+          .update({
+            last_seen: new Date().toISOString()
+          })
+          .eq('user_id', currentUser.id)
+          .select()
+          .single();
 
-      if (!data) {
-        // If presence record doesn't exist, create it
-        await setupPresence();
+        if (!data) {
+          // If presence record doesn't exist, create it
+          await setupPresence();
+        }
+      } catch (error) {
+        console.error('Error updating presence:', error);
       }
     }, 60000);
 
@@ -113,109 +125,148 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     const cleanup = async () => {
       if (!isSubscribed) return;
 
-      await supabase
-        .from('presence')
-        .delete()
-        .eq('user_id', currentUser.id);
-      
-      presenceChannel.unsubscribe();
-      challengesChannel.unsubscribe();
-      clearInterval(interval);
+      try {
+        await supabase
+          .from('presence')
+          .delete()
+          .eq('user_id', currentUser.id);
+        
+        presenceChannel.unsubscribe();
+        challengesChannel.unsubscribe();
+        clearInterval(interval);
+      } catch (error) {
+        console.error('Error cleaning up:', error);
+      }
     };
 
-    if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', cleanup);
+    // Handle cleanup on unmount
+    const handleBeforeUnload = () => {
+      cleanup();
+    };
+
+    if (typeof globalThis !== 'undefined') {
+      globalThis.addEventListener('beforeunload', handleBeforeUnload);
     }
 
     return () => {
       isSubscribed = false;
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('beforeunload', cleanup);
+      if (typeof globalThis !== 'undefined') {
+        globalThis.removeEventListener('beforeunload', handleBeforeUnload);
       }
       cleanup();
     };
   }, [currentUser]);
 
   const fetchActiveUsers = async () => {
-    const { data } = await supabase
-      .from('presence')
-      .select('*')
-      .gt('last_seen', new Date(Date.now() - 5 * 60 * 1000).toISOString());
-    
-    if (data) {
-      // Remove duplicates by user_id, keeping only the most recent entry
-      const uniqueUsers = data.reduce((acc, user) => {
-        if (!acc[user.user_id] || new Date(user.last_seen) > new Date(acc[user.user_id].last_seen)) {
-          acc[user.user_id] = user;
-        }
-        return acc;
-      }, {} as Record<string, ActiveUser>);
+    try {
+      const { data } = await supabase
+        .from('presence')
+        .select('*')
+        .gt('last_seen', new Date(Date.now() - 5 * 60 * 1000).toISOString());
       
-      setActiveUsers(Object.values(uniqueUsers));
+      if (data) {
+        // Remove duplicates by user_id, keeping only the most recent entry
+        const uniqueUsers = data.reduce((acc, user) => {
+          if (!acc[user.user_id] || new Date(user.last_seen) > new Date(acc[user.user_id].last_seen)) {
+            acc[user.user_id] = user;
+          }
+          return acc;
+        }, {} as Record<string, ActiveUser>);
+        
+        setActiveUsers(Object.values(uniqueUsers));
+      }
+    } catch (error) {
+      console.error('Error fetching active users:', error);
     }
   };
 
   const fetchChallenges = async () => {
-    const { data } = await supabase
-      .from('game_challenges')
-      .select('*')
-      .or(`challenger_id.eq.${currentUser.id},challenged_id.eq.${currentUser.id}`)
-      .eq('status', 'pending');
-    
-    if (data) {
-      setChallenges(data);
+    try {
+      const { data } = await supabase
+        .from('game_challenges')
+        .select('*')
+        .or(`challenger_id.eq.${currentUser.id},challenged_id.eq.${currentUser.id}`)
+        .eq('status', 'pending');
+      
+      if (data) {
+        setChallenges(data);
+      }
+    } catch (error) {
+      console.error('Error fetching challenges:', error);
     }
   };
 
   const challengeUser = async (userId: string) => {
-    await supabase
-      .from('game_challenges')
-      .insert({
-        challenger_id: currentUser.id,
-        challenged_id: userId,
-        status: 'pending'
-      });
+    if (isLoading) return;
+    setIsLoading(true);
+
+    try {
+      const { error } = await supabase
+        .from('game_challenges')
+        .insert({
+          challenger_id: currentUser.id,
+          challenged_id: userId,
+          status: 'pending'
+        });
+
+      if (error) throw error;
+      await fetchChallenges();
+    } catch (error) {
+      console.error('Error creating challenge:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const respondToChallenge = async (challengeId: string, accept: boolean) => {
-    if (accept) {
-      const { data: challenge } = await supabase
-        .from('game_challenges')
-        .update({ status: 'accepted' })
-        .eq('id', challengeId)
-        .select()
-        .single();
+    if (isLoading) return;
+    setIsLoading(true);
 
-      if (challenge) {
-        // Create a new live game
-        const { data: game } = await supabase
-          .from('live_games')
-          .insert({
-            player_x: challenge.challenger_id,
-            player_o: challenge.challenged_id
-          })
+    try {
+      if (accept) {
+        const { data: challenge } = await supabase
+          .from('game_challenges')
+          .update({ status: 'accepted' })
+          .eq('id', challengeId)
           .select()
           .single();
 
-        if (game) {
-          // Update both players' presence
-          await supabase
-            .from('presence')
-            .update({
-              status: 'in_game',
-              current_game_id: game.id
+        if (challenge) {
+          // Create a new live game
+          const { data: game } = await supabase
+            .from('live_games')
+            .insert({
+              player_x: challenge.challenger_id,
+              player_o: challenge.challenged_id,
+              current_board: Array(9).fill(null)
             })
-            .in('user_id', [challenge.challenger_id, challenge.challenged_id]);
+            .select()
+            .single();
 
-          // Redirect to the game
-          router.push(`/game/${game.id}`);
+          if (game) {
+            // Update both players' presence
+            await supabase
+              .from('presence')
+              .update({
+                status: 'in_game',
+                current_game_id: game.id
+              })
+              .in('user_id', [challenge.challenger_id, challenge.challenged_id]);
+
+            // Redirect to the game
+            router.push(`/game/${game.id}`);
+          }
         }
+      } else {
+        await supabase
+          .from('game_challenges')
+          .update({ status: 'declined' })
+          .eq('id', challengeId);
       }
-    } else {
-      await supabase
-        .from('game_challenges')
-        .update({ status: 'declined' })
-        .eq('id', challengeId);
+    } catch (error) {
+      console.error('Error responding to challenge:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -238,25 +289,29 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
                 {user.status === 'in_game' ? 'In Game' : user.status === 'idle' ? 'Idle' : 'Online'}
               </p>
             </div>
-            {user.id !== currentUser.id && (
+            {user.user_id !== currentUser.id && (
               <div>
                 {user.status === 'in_game' ? (
                   <button
                     onClick={() => spectateGame(user.current_game_id!)}
                     className="btn-secondary text-sm"
+                    disabled={isLoading}
                   >
                     Spectate
                   </button>
                 ) : (
                   <button
-                    onClick={() => challengeUser(user.id)}
+                    onClick={() => challengeUser(user.user_id)}
                     className="btn-primary text-sm"
-                    disabled={challenges.some(c => 
-                      (c.challenger_id === currentUser.id && c.challenged_id === user.id) ||
-                      (c.challenger_id === user.id && c.challenged_id === currentUser.id)
-                    )}
+                    disabled={
+                      isLoading ||
+                      challenges.some(c => 
+                        (c.challenger_id === currentUser.id && c.challenged_id === user.user_id) ||
+                        (c.challenger_id === user.user_id && c.challenged_id === currentUser.id)
+                      )
+                    }
                   >
-                    Challenge
+                    {isLoading ? 'Loading...' : 'Challenge'}
                   </button>
                 )}
               </div>
@@ -281,20 +336,22 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
                 ) : (
                   <div>
                     <p className="text-gray-200 mb-2">
-                      {activeUsers.find(u => u.id === challenge.challenger_id)?.username} challenged you!
+                      {activeUsers.find(u => u.user_id === challenge.challenger_id)?.username} challenged you!
                     </p>
                     <div className="flex gap-2">
                       <button
                         onClick={() => respondToChallenge(challenge.id, true)}
                         className="btn-primary text-sm"
+                        disabled={isLoading}
                       >
-                        Accept
+                        {isLoading ? 'Loading...' : 'Accept'}
                       </button>
                       <button
                         onClick={() => respondToChallenge(challenge.id, false)}
                         className="btn-danger text-sm"
+                        disabled={isLoading}
                       >
-                        Decline
+                        {isLoading ? 'Loading...' : 'Decline'}
                       </button>
                     </div>
                   </div>
