@@ -5,6 +5,13 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { redirect } from 'next/navigation';
 import GameBoard from '../components/GameBoard';
 
+declare const window: {
+  confirm: (message: string) => boolean;
+  location: {
+    reload: () => void;
+  };
+};
+
 interface MatchHistory {
   id: string;
   user_id: string;
@@ -74,11 +81,9 @@ export default function Stats() {
   }, [session]);
 
   const handleResetStats = async () => {
-    if (typeof window !== 'undefined' && window.confirm('Are you sure you want to reset all your stats? This cannot be undone.')) {
+    if (window.confirm('Are you sure you want to reset all your stats? This cannot be undone.')) {
       await supabase.rpc('reset_user_stats', { user_id: session.user.id });
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      }
+      window.location.reload();
     }
   };
 
@@ -140,7 +145,6 @@ export default function Stats() {
                       <GameBoard 
                         currentUser={session.user}
                         gridSize={match.grid_size}
-                        isSpectator={true}
                       />
                     </div>
                   )}
