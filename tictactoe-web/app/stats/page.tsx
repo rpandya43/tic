@@ -52,28 +52,49 @@ export default async function Stats() {
         </div>
         
         <div className="grid gap-8">
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl">
-            <div className="text-center">
-              <p className="text-2xl font-semibold text-gray-200 mb-2">Total Wins</p>
-              <p className="text-5xl font-bold text-blue-400">{stats?.wins || 0}</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl">
+              <div className="text-center">
+                <p className="text-2xl font-semibold text-gray-200 mb-2">Total Wins (as X)</p>
+                <p className="text-5xl font-bold text-blue-400">{stats?.wins || 0}</p>
+              </div>
+            </div>
+            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl">
+              <div className="text-center">
+                <p className="text-2xl font-semibold text-gray-200 mb-2">Games as O</p>
+                <p className="text-5xl font-bold text-green-400">
+                  {matches?.filter(m => m.winner === 'O').length || 0}
+                </p>
+              </div>
+            </div>
+            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl">
+              <div className="text-center">
+                <p className="text-2xl font-semibold text-gray-200 mb-2">Total Games</p>
+                <p className="text-5xl font-bold text-purple-400">{matches?.length || 0}</p>
+              </div>
             </div>
           </div>
 
           {matches && matches.length > 0 && (
             <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-8 shadow-2xl">
-              <h2 className="text-2xl font-semibold text-gray-200 mb-6">Recent Matches</h2>
-              <div className="space-y-6">
+              <h2 className="text-2xl font-semibold text-gray-200 mb-6">Match History</h2>
+              <div className="space-y-8">
                 {matches.map((match) => (
                   <div key={match.id} className="bg-gray-900/50 rounded-lg p-6">
                     <div className="flex justify-between items-center mb-4">
-                      <p className="text-lg font-medium text-gray-200">
-                        Winner: <span className={match.winner === 'X' ? 'text-blue-400' : 'text-green-400'}>
-                          {match.winner}
-                        </span>
-                      </p>
-                      <p className="text-sm text-gray-400">
-                        {new Date(match.created_at).toLocaleDateString()}
-                      </p>
+                      <div className="space-y-1">
+                        <p className="text-lg font-medium text-gray-200">
+                          Winner: <span className={match.winner === 'X' ? 'text-blue-400' : 'text-green-400'}>
+                            {match.winner}
+                          </span>
+                        </p>
+                        <p className="text-sm text-gray-400">
+                          {new Date(match.created_at).toLocaleString()}
+                        </p>
+                        <p className="text-sm text-gray-400">
+                          Total Moves: {match.moves.length}
+                        </p>
+                      </div>
                     </div>
                     <GameBoard initialMoves={match.moves} isReplay={true} />
                   </div>

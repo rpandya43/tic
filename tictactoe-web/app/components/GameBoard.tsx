@@ -42,6 +42,15 @@ export default function GameBoard({ initialMoves, isReplay }: GameBoardProps) {
       }
       setBoard(newBoard);
       setCurrentPlayer(currentMoveIndex % 2 === 0 ? 'O' : 'X');
+
+      // Check for winner after applying moves
+      const gameWinner = checkWinner(newBoard);
+      if (gameWinner) {
+        setWinner(gameWinner);
+        setIsGameOver(true);
+      } else if (!newBoard.includes(null)) {
+        setIsGameOver(true);
+      }
     }
   }, [currentMoveIndex, moves, isReplay]);
 
@@ -95,16 +104,27 @@ export default function GameBoard({ initialMoves, isReplay }: GameBoardProps) {
 
     const newBoard = [...board];
     newBoard[index] = currentPlayer;
+    const newMoves = [...moves, { position: index, player: currentPlayer }];
     setBoard(newBoard);
-    setMoves([...moves, { position: index, player: currentPlayer }]);
+    setMoves(newMoves);
 
     const gameWinner = checkWinner(newBoard);
     if (gameWinner) {
       setWinner(gameWinner);
       setIsGameOver(true);
-      if (gameWinner === 'X') {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Store match history regardless of winner
+        await supabase
+          .from('match_history')
+          .insert({
+            user_id: user.id,
+            winner: gameWinner,
+            moves: newMoves
+          });
+
+        // Update wins only if X wins
+        if (gameWinner === 'X') {
           const { data: stats } = await supabase
             .from('game_stats')
             .select('wins')
@@ -112,25 +132,27 @@ export default function GameBoard({ initialMoves, isReplay }: GameBoardProps) {
             .single();
 
           const currentWins = stats?.wins || 0;
-          await Promise.all([
-            supabase
-              .from('game_stats')
-              .upsert({
-                user_id: user.id,
-                wins: currentWins + 1,
-              }),
-            supabase
-              .from('match_history')
-              .insert({
-                user_id: user.id,
-                winner: gameWinner,
-                moves: moves,
-              })
-          ]);
+          await supabase
+            .from('game_stats')
+            .upsert({
+              user_id: user.id,
+              wins: currentWins + 1,
+            });
         }
       }
     } else if (!newBoard.includes(null)) {
       setIsGameOver(true);
+      // Store draws in match history
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('match_history')
+          .insert({
+            user_id: user.id,
+            winner: currentPlayer, // Store the last player as winner in case of draw
+            moves: newMoves
+          });
+      }
     } else {
       setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
     }
