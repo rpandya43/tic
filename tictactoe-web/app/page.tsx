@@ -1,10 +1,20 @@
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import GameBoard from './components/GameBoard';
 
 export default async function Home() {
   const supabase = createServerComponentClient({ cookies });
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  if (error) {
+    console.error('Auth error:', error);
+    return <div>Error loading session</div>;
+  }
+
+  if (!session) {
+    redirect('/login');
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-24">

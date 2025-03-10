@@ -2,7 +2,7 @@
 
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function Login() {
   const router = useRouter();
@@ -11,25 +11,40 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        router.push('/');
+      }
+      setIsCheckingSession(false);
+    };
+    checkSession();
+  }, [router, supabase.auth]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setError(error.message);
-    } else {
-      router.push('/');
-      router.refresh();
+      if (error) {
+        setError(error.message);
+      } else {
+        router.push('/');
+      }
+    } catch (err) {
+      setError('An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -37,19 +52,31 @@ export default function Login() {
     setIsLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
 
-    if (error) {
-      setError(error.message);
-    } else {
-      setError('Check your email for the confirmation link!');
+      if (error) {
+        setError(error.message);
+      } else {
+        setError('Check your email for the confirmation link!');
+      }
+    } catch (err) {
+      setError('An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
+
+  if (isCheckingSession) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-xl">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-24">
