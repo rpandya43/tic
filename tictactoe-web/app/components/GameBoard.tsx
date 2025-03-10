@@ -5,14 +5,45 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 type Player = 'X' | 'O';
 type Board = (Player | null)[];
+type Move = { position: number; player: Player };
 
-export default function GameBoard() {
+interface GameBoardProps {
+  initialMoves?: Move[];
+  isReplay?: boolean;
+}
+
+export default function GameBoard({ initialMoves, isReplay }: GameBoardProps) {
   const [board, setBoard] = useState<Board>(Array(9).fill(null));
   const [currentPlayer, setCurrentPlayer] = useState<Player>('X');
   const [winner, setWinner] = useState<Player | null>(null);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isAutoPlay, setIsAutoPlay] = useState(false);
+  const [moves, setMoves] = useState<Move[]>([]);
+  const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
   const supabase = createClientComponentClient();
+
+  useEffect(() => {
+    if (initialMoves && isReplay) {
+      setMoves(initialMoves);
+      if (currentMoveIndex < initialMoves.length - 1) {
+        const timer = setTimeout(() => {
+          setCurrentMoveIndex(prev => prev + 1);
+        }, 1000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [initialMoves, currentMoveIndex, isReplay]);
+
+  useEffect(() => {
+    if (isReplay && currentMoveIndex >= 0) {
+      const newBoard = Array(9).fill(null);
+      for (let i = 0; i <= currentMoveIndex; i++) {
+        newBoard[moves[i].position] = moves[i].player;
+      }
+      setBoard(newBoard);
+      setCurrentPlayer(currentMoveIndex % 2 === 0 ? 'O' : 'X');
+    }
+  }, [currentMoveIndex, moves, isReplay]);
 
   const checkWinner = (squares: Board): Player | null => {
     const lines = [
@@ -51,7 +82,7 @@ export default function GameBoard() {
   };
 
   useEffect(() => {
-    if (isAutoPlay && currentPlayer === 'O' && !isGameOver) {
+    if (isAutoPlay && currentPlayer === 'O' && !isGameOver && !isReplay) {
       const timer = setTimeout(() => {
         makeAutoMove();
       }, 1000);
@@ -60,11 +91,12 @@ export default function GameBoard() {
   }, [currentPlayer, isAutoPlay, isGameOver]);
 
   const handleClick = async (index: number) => {
-    if (board[index] || isGameOver) return;
+    if (board[index] || isGameOver || isReplay) return;
 
     const newBoard = [...board];
     newBoard[index] = currentPlayer;
     setBoard(newBoard);
+    setMoves([...moves, { position: index, player: currentPlayer }]);
 
     const gameWinner = checkWinner(newBoard);
     if (gameWinner) {
@@ -80,12 +112,21 @@ export default function GameBoard() {
             .single();
 
           const currentWins = stats?.wins || 0;
-          await supabase
-            .from('game_stats')
-            .upsert({
-              user_id: user.id,
-              wins: currentWins + 1,
-            });
+          await Promise.all([
+            supabase
+              .from('game_stats')
+              .upsert({
+                user_id: user.id,
+                wins: currentWins + 1,
+              }),
+            supabase
+              .from('match_history')
+              .insert({
+                user_id: user.id,
+                winner: gameWinner,
+                moves: moves,
+              })
+          ]);
         }
       }
     } else if (!newBoard.includes(null)) {
@@ -100,29 +141,33 @@ export default function GameBoard() {
     setCurrentPlayer('X');
     setWinner(null);
     setIsGameOver(false);
+    setMoves([]);
+    setCurrentMoveIndex(-1);
   };
 
   return (
     <div className="w-full max-w-md mx-auto space-y-8">
-      <div className="flex justify-between items-center">
-        <div className="text-xl font-semibold text-gray-200">
-          Mode: {isAutoPlay ? 'vs Computer' : 'vs Player'}
+      {!isReplay && (
+        <div className="flex justify-between items-center">
+          <div className="text-xl font-semibold text-gray-200">
+            Mode: {isAutoPlay ? 'vs Computer' : 'vs Player'}
+          </div>
+          <button
+            onClick={() => setIsAutoPlay(!isAutoPlay)}
+            className="btn-secondary"
+          >
+            {isAutoPlay ? 'Switch to 2 Players' : 'Switch to vs Computer'}
+          </button>
         </div>
-        <button
-          onClick={() => setIsAutoPlay(!isAutoPlay)}
-          className="btn-secondary"
-        >
-          {isAutoPlay ? 'Switch to 2 Players' : 'Switch to vs Computer'}
-        </button>
-      </div>
+      )}
       <div className="grid grid-cols-3 gap-4">
         {board.map((cell, index) => (
           <button
             key={index}
             onClick={() => handleClick(index)}
-            disabled={!!cell || isGameOver || (isAutoPlay && currentPlayer === 'O')}
+            disabled={!!cell || isGameOver || (isAutoPlay && currentPlayer === 'O') || isReplay}
             className={`w-24 h-24 text-4xl font-bold rounded-xl transition-all duration-200
-              ${!cell && !isGameOver ? 'hover:bg-gray-700/50' : ''}
+              ${!cell && !isGameOver && !isReplay ? 'hover:bg-gray-700/50' : ''}
               ${cell ? 'bg-gray-800' : 'bg-gray-800/50'}
               ${cell === 'X' ? 'text-blue-400' : cell === 'O' ? 'text-green-400' : 'text-gray-700'}
               disabled:cursor-not-allowed backdrop-blur-sm
@@ -141,12 +186,14 @@ export default function GameBoard() {
               ? 'Game Over - Draw!' 
               : `Current Player: ${currentPlayer}`}
         </div>
-        <button
-          onClick={resetGame}
-          className="btn-primary"
-        >
-          Reset Game
-        </button>
+        {!isReplay && (
+          <button
+            onClick={resetGame}
+            className="btn-primary"
+          >
+            Reset Game
+          </button>
+        )}
       </div>
     </div>
   );
