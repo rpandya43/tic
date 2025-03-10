@@ -21,6 +21,12 @@ interface Challenge {
   status: 'pending' | 'accepted' | 'declined' | 'cancelled';
 }
 
+interface RealtimePayload {
+  new: Challenge;
+  old: Challenge;
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+}
+
 export default function ActiveUsers({ currentUser }: { currentUser: User }) {
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -86,12 +92,12 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
           table: 'game_challenges',
           filter: `challenger_id=eq.${currentUser.id} OR challenged_id=eq.${currentUser.id}`
         },
-        async (payload) => {
+        async (payload: RealtimePayload) => {
           if (!isSubscribed) return;
 
           // If a challenge was accepted, check if we need to redirect
           if (payload.new && payload.new.status === 'accepted') {
-            const challenge = payload.new as Challenge;
+            const challenge = payload.new;
             if (challenge.challenger_id === currentUser.id || challenge.challenged_id === currentUser.id) {
               const { data: game } = await supabase
                 .from('live_games')
@@ -159,14 +165,15 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
       }
     };
 
-    if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', cleanup);
+    // Handle cleanup on unmount and page unload
+    if (typeof globalThis !== 'undefined' && 'window' in globalThis) {
+      globalThis.window.addEventListener('beforeunload', cleanup);
     }
 
     return () => {
       isSubscribed = false;
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('beforeunload', cleanup);
+      if (typeof globalThis !== 'undefined' && 'window' in globalThis) {
+        globalThis.window.removeEventListener('beforeunload', cleanup);
       }
       cleanup();
     };
