@@ -1,60 +1,49 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { User } from '@supabase/supabase-js';
 
 interface GameBoardProps {
   currentUser: User;
-  gridSize?: number;
-  onGameEnd?: (winner: string | null) => void;
 }
 
-export default function GameBoard({ currentUser, gridSize = 3, onGameEnd }: GameBoardProps) {
-  const [board, setBoard] = useState<(string | null)[]>(Array(gridSize * gridSize).fill(null));
+export default function GameBoard({ currentUser }: GameBoardProps) {
+  const [board, setBoard] = useState<(string | null)[]>(Array(9).fill(null));
   const [currentPlayer, setCurrentPlayer] = useState<'X' | 'O'>('X');
   const [winner, setWinner] = useState<string | null>(null);
   const supabase = createClientComponentClient();
 
-  useEffect(() => {
-    // Reset board when grid size changes
-    setBoard(Array(gridSize * gridSize).fill(null));
-    setWinner(null);
-    setCurrentPlayer('X');
-  }, [gridSize]);
-
   const checkWinner = (currentBoard: (string | null)[]) => {
-    // Check rows
-    for (let i = 0; i < gridSize; i++) {
-      const row = currentBoard.slice(i * gridSize, (i + 1) * gridSize);
-      if (row.every(cell => cell === 'X')) return 'X';
-      if (row.every(cell => cell === 'O')) return 'O';
+    const lines = [
+      [0, 1, 2],
+      [3, 4, 5],
+      [6, 7, 8],
+      [0, 3, 6],
+      [1, 4, 7],
+      [2, 5, 8],
+      [0, 4, 8],
+      [2, 4, 6],
+    ];
+
+    for (const [a, b, c] of lines) {
+      if (
+        currentBoard[a] &&
+        currentBoard[a] === currentBoard[b] &&
+        currentBoard[a] === currentBoard[c]
+      ) {
+        return currentBoard[a];
+      }
     }
 
-    // Check columns
-    for (let i = 0; i < gridSize; i++) {
-      const column = Array.from({ length: gridSize }, (_, j) => currentBoard[i + j * gridSize]);
-      if (column.every(cell => cell === 'X')) return 'X';
-      if (column.every(cell => cell === 'O')) return 'O';
+    if (currentBoard.every(cell => cell !== null)) {
+      return 'draw';
     }
-
-    // Check diagonals
-    const diagonal1 = Array.from({ length: gridSize }, (_, i) => currentBoard[i * (gridSize + 1)]);
-    const diagonal2 = Array.from({ length: gridSize }, (_, i) => currentBoard[(i + 1) * (gridSize - 1)]);
-
-    if (diagonal1.every(cell => cell === 'X')) return 'X';
-    if (diagonal1.every(cell => cell === 'O')) return 'O';
-    if (diagonal2.every(cell => cell === 'X')) return 'X';
-    if (diagonal2.every(cell => cell === 'O')) return 'O';
-
-    // Check for draw
-    if (currentBoard.every(cell => cell !== null)) return 'draw';
 
     return null;
   };
 
-  const handleClick = (index: number) => {
-    // Don't allow moves if cell is filled or there's a winner
+  const handleClick = async (index: number) => {
     if (board[index] || winner) {
       return;
     }
@@ -66,14 +55,68 @@ export default function GameBoard({ currentUser, gridSize = 3, onGameEnd }: Game
     const gameWinner = checkWinner(newBoard);
     if (gameWinner) {
       setWinner(gameWinner);
-      if (onGameEnd) onGameEnd(gameWinner);
+      
+      // Update stats only if player X (currentUser) wins
+      if (gameWinner === 'X') {
+        const { data: existingStats } = await supabase
+          .from('game_stats')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .single();
+
+        if (existingStats) {
+          await supabase
+            .from('game_stats')
+            .update({
+              wins: existingStats.wins + 1,
+              total_games: existingStats.total_games + 1,
+            })
+            .eq('user_id', currentUser.id);
+        } else {
+          await supabase
+            .from('game_stats')
+            .insert([
+              {
+                user_id: currentUser.id,
+                wins: 1,
+                total_games: 1,
+              },
+            ]);
+        }
+      } else {
+        // If O wins or it's a draw, just increment total games
+        const { data: existingStats } = await supabase
+          .from('game_stats')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .single();
+
+        if (existingStats) {
+          await supabase
+            .from('game_stats')
+            .update({
+              total_games: existingStats.total_games + 1,
+            })
+            .eq('user_id', currentUser.id);
+        } else {
+          await supabase
+            .from('game_stats')
+            .insert([
+              {
+                user_id: currentUser.id,
+                wins: 0,
+                total_games: 1,
+              },
+            ]);
+        }
+      }
     }
 
     setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
   };
 
   const resetGame = () => {
-    setBoard(Array(gridSize * gridSize).fill(null));
+    setBoard(Array(9).fill(null));
     setWinner(null);
     setCurrentPlayer('X');
   };
@@ -90,11 +133,7 @@ export default function GameBoard({ currentUser, gridSize = 3, onGameEnd }: Game
         Current Player: {currentPlayer}
       </div>
 
-      <div className="grid gap-2" style={{
-        gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
-        width: '100%',
-        maxWidth: '400px'
-      }}>
+      <div className="grid grid-cols-3 gap-2 w-full max-w-[400px]">
         {board.map((value, index) => (
           <button
             key={index}
