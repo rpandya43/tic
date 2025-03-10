@@ -62,7 +62,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
     };
 
     // Subscribe to presence changes
-    const presenceChannel = supabase.channel('presence-' + currentUser.id);
+    const presenceChannel = supabase.channel('presence');
     
     presenceChannel
       .on(
@@ -81,7 +81,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
       .subscribe();
 
     // Subscribe to challenges
-    const challengesChannel = supabase.channel('challenges-' + currentUser.id);
+    const challengesChannel = supabase.channel('challenges');
     
     challengesChannel
       .on(
@@ -89,8 +89,7 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
         {
           event: '*',
           schema: 'public',
-          table: 'game_challenges',
-          filter: `challenger_id=eq.${currentUser.id} OR challenged_id=eq.${currentUser.id}`
+          table: 'game_challenges'
         },
         async (payload: RealtimePayload) => {
           if (!isSubscribed) return;
@@ -109,13 +108,42 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
                 .single();
 
               if (game) {
+                // Update both players' presence
+                await supabase
+                  .from('presence')
+                  .update({
+                    status: 'in_game',
+                    current_game_id: game.id
+                  })
+                  .in('user_id', [challenge.challenger_id, challenge.challenged_id]);
+
                 router.push(`/game/${game.id}`);
                 return;
               }
             }
           }
 
-          fetchChallenges();
+          // Always fetch challenges to update the UI
+          await fetchChallenges();
+        }
+      )
+      .subscribe();
+
+    // Subscribe to live games
+    const gamesChannel = supabase.channel('games');
+    
+    gamesChannel
+      .on(
+        'postgres_changes' as any,
+        {
+          event: '*',
+          schema: 'public',
+          table: 'live_games'
+        },
+        () => {
+          if (isSubscribed) {
+            fetchActiveUsers();
+          }
         }
       )
       .subscribe();
@@ -159,13 +187,13 @@ export default function ActiveUsers({ currentUser }: { currentUser: User }) {
         
         presenceChannel.unsubscribe();
         challengesChannel.unsubscribe();
+        gamesChannel.unsubscribe();
         clearInterval(interval);
       } catch (error) {
         console.error('Error cleaning up:', error);
       }
     };
 
-    // Handle cleanup on unmount and page unload
     if (typeof globalThis !== 'undefined' && 'window' in globalThis) {
       globalThis.window.addEventListener('beforeunload', cleanup);
     }
