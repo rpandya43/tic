@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import GameBoard from './components/GameBoard';
+import Footer from './components/Footer';
 
 export default async function Home() {
   const supabase = createServerComponentClient({ cookies });
@@ -37,6 +38,7 @@ export default async function Home() {
         </div>
         <GameBoard />
       </div>
+      <Footer />
     </main>
   );
 } 

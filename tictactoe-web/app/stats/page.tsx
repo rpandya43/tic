@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import GameBoard from '../components/GameBoard';
 import ResetStatsButton from './ResetStatsButton';
+import Footer from '../components/Footer';
 
 export default async function Stats() {
   const supabase = createServerComponentClient({ cookies });
@@ -108,11 +109,7 @@ export default async function Stats() {
           </div>
         </div>
       </div>
-      <footer className="relative z-10 w-full max-w-4xl mx-auto mt-12 text-center text-gray-400">
-        <p className="text-sm">
-          Made with ❤️ and ☕️ by Rhythm Pandya
-        </p>
-      </footer>
+      <Footer />
     </main>
   );
 } 
