@@ -1,16 +1,43 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { redirect } from 'next/navigation';
 import GameBoard from './components/GameBoard';
 import ActiveUsers from './components/ActiveUsers';
 import Footer from './components/Footer';
 
-export default async function Home() {
-  const supabase = createServerComponentClient({ cookies });
-  const { data: { session } } = await supabase.auth.getSession();
+export default function Home() {
+  const [session, setSession] = useState<any>(null);
+  const supabase = createClientComponentClient();
+
+  useEffect(() => {
+    const getSession = async () => {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      setSession(currentSession);
+
+      if (!currentSession) {
+        redirect('/login');
+      }
+    };
+
+    getSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+
+      if (!session) {
+        redirect('/login');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   if (!session) {
-    redirect('/login');
+    return null;
   }
 
   return (
@@ -39,7 +66,7 @@ export default async function Home() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-3">
-            <GameBoard />
+            <GameBoard currentUser={session.user} />
           </div>
           <div>
             <ActiveUsers currentUser={session.user} />

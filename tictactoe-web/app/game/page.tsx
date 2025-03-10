@@ -1,35 +1,65 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { redirect } from 'next/navigation';
 import GameBoard from '../components/GameBoard';
 import GridSizeSelector from '../components/GridSizeSelector';
 
 export default function Game() {
   const [gridSize, setGridSize] = useState(3);
+  const [session, setSession] = useState<any>(null);
   const supabase = createClientComponentClient();
 
+  useEffect(() => {
+    const getSession = async () => {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      setSession(currentSession);
+
+      if (!currentSession) {
+        redirect('/login');
+      }
+    };
+
+    getSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+
+      if (!session) {
+        redirect('/login');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   const handleGameEnd = async (winner: string | null) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!session?.user) return;
 
     // Update stats only if player X wins
     if (winner === 'X') {
       const { data: stats } = await supabase
         .from('game_stats')
         .select('wins')
-        .eq('user_id', user.id)
+        .eq('user_id', session.user.id)
         .single();
 
       const currentWins = stats?.wins || 0;
       await supabase
         .from('game_stats')
         .upsert({
-          user_id: user.id,
+          user_id: session.user.id,
           wins: currentWins + 1,
         });
     }
   };
+
+  if (!session) {
+    return null;
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -40,7 +70,7 @@ export default function Game() {
             <GridSizeSelector currentSize={gridSize} onSelect={setGridSize} />
           </div>
           <GameBoard 
-            currentUser={null as any} 
+            currentUser={session.user}
             gridSize={gridSize}
             onGameEnd={handleGameEnd}
           />
